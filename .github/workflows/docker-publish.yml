@@ -1,0 +1,61 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - production
+
+jobs:
+  build-docker-image:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    # Create Build Push Stop
+    - name: Login to GitHub
+      run: docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+    - name: Start containers
+      run: docker-compose -f "docker-compose.prod.yml" build
+    - name: Pushing all images
+      run: docker-compose -f "docker-compose.prod.yml" push
+    - name: Stop containers
+      if: always()
+      run: docker-compose -f "docker-compose.prod.yml" down
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-docker-image
+
+    steps:
+    # Deploy to EC2
+    - name: Deploy API to EC2
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.HOST_DNS }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          sudo docker stop $(sudo docker ps -aq)
+          sudo docker container prune
+          sudo docker rmi -f $(sudo docker images -a -q)
+          sudo docker rmi ghcr.io/glo3112-classrooms/ugram-h2023-team-14/ugram_api
+          sudo docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+          sudo docker pull ghcr.io/glo3112-classrooms/ugram-h2023-team-14/ugram_api:latest
+          sudo docker compose up -d
+  
+    - name: Deploy WEB to ionos
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.HOST_DNS_IONOS }}
+        username: ${{ secrets.USERNAME_IONOS }}
+        key: ${{ secrets.SSH_PRIVATE_KEY_IONOS }}
+        script: |
+          sudo docker stop $(sudo docker ps -aq)
+          sudo docker container prune
+          sudo docker rmi -f $(sudo docker images -a -q)
+          sudo docker rmi ghcr.io/glo3112-classrooms/ugram-h2023-team-14/ugram_web
+          sudo docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+          sudo docker pull ghcr.io/glo3112-classrooms/ugram-h2023-team-14/ugram_web:latest
+          sudo docker compose up -d
